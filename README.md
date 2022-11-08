@@ -17,3 +17,7 @@ Incoming HTTP requests are validated using request validation in API Gateway by 
 
 # UI Login page:
 I have customized UI of login page from Udacity project 4.
+
+# ADD More:
+Delete Image in S3 when delete Todo
+Use XRay to monitor

@@ -1,13 +1,12 @@
 import * as AWS from "aws-sdk";
-const AWSXRay = require('aws-xray-sdk');
 import { DocumentClient } from "aws-sdk/clients/dynamodb";
 import { Types } from 'aws-sdk/clients/s3';
 import { TodoItem } from "../models/TodoItem";
 import { TodoUpdate } from "../models/TodoUpdate";
 import { createLogger } from '../utils/logger';
 
-const logger = createLogger('todoAccess');
-
+const logger = createLogger('Log from TodoAccess.ts');
+const AWSXRay = require('aws-xray-sdk');
 const XAWS = AWSXRay.captureAWS(AWS);
 
 export class ToDoAccess {
@@ -19,7 +18,7 @@ export class ToDoAccess {
     }
 
     async getAllToDo(userId: string): Promise<TodoItem[]> {
-        logger.info('Get all todo...');
+        logger.info(`Processing: Getting all todos of ${userId} from ${this.todoTable}`);
         const params = {
             TableName: this.todoTable,
             KeyConditionExpression: "#userId = :userId",
@@ -32,12 +31,13 @@ export class ToDoAccess {
         };
         const result = await this.docClient.query(params).promise();
         const items = result.Items;
+        logger.info(`Processing: Get ${items.length} todos of ${userId} from ${this.todoTable}`);
 
         return items as TodoItem[];
     }
 
     async createToDo(todoItem: TodoItem): Promise<TodoItem> {
-        logger.info('Create new todo: ', todoItem)
+        logger.info(`Create new todo: Insert ${todoItem.todoId} of user: ${todoItem.userId} into table: ${this.todoTable}`)
         const params = {
             TableName: this.todoTable,
             Item: todoItem,
@@ -55,18 +55,18 @@ export class ToDoAccess {
                 "userId": userId,
                 "todoId": todoId
             },
-            UpdateExpression: "set #a = :a, #b = :b, #c = :c",
+            UpdateExpression: "set #todoName = :todoName, #todoDate = :todoDate, #status = :status",
             ExpressionAttributeNames: {
-                "#a": "name",
-                "#b": "dueDate",
-                "#c": "done"
+                "#todoName": "name",
+                "#todoDate": "dueDate",
+                "#status": "done"
             },
             ExpressionAttributeValues: {
-                ":a": todoUpdate['name'],
-                ":b": todoUpdate['dueDate'],
-                ":c": todoUpdate['done']
+                ":todoName": todoUpdate.name,
+                ":todoDate": todoUpdate.dueDate,
+                ":status": todoUpdate.done
             },
-            ReturnValues: "ALL_NEW"
+            ReturnValues: "UPDATED_NEW"
         };
 
         const result = await this.docClient.update(params).promise();
@@ -95,11 +95,48 @@ export class ToDoAccess {
         const url = this.s3Client.getSignedUrl('putObject', {
             Bucket: this.s3BucketName,
             Key: todoId,
-            Expires: 1000,
+            Expires: 600,
         });
 
         return url as string;
     }
+
+    async removeImageInS3(id: string): Promise<void> {
+        const params = {
+          Bucket: this.s3BucketName,
+          Key: id
+        }
+        try {
+            logger.info(`Find image of id: ${id} in S3`)
+          await this.s3Client.headObject(params).promise()
+
+          try {
+            await this.s3Client.deleteObject(params).promise()
+            logger.info(`Image of id: ${id} deleted Successfully`)
+          }
+          catch (err) {
+            logger.error("Error in deleting Image in S3 : " + JSON.stringify(err))
+          }
+        } catch (err) {
+          logger.error("File not Found ERROR : " + err.code)
+        }
+      }
+
+    async getTodoItemByKeySchema(todoId: string, userId: string): Promise<TodoItem> {
+        logger.info(`Getting todo ${todoId} from ${this.todoTable}`)
+        const params = {
+            TableName: this.todoTable,
+            Key: {
+                "userId": userId,
+                "todoId": todoId
+            },
+        };
+        const result = await this.docClient.get(params).promise()
+    
+        const item = result.Item
+    
+        return item as TodoItem
+      }
     
 }
 

@@ -13,15 +13,15 @@ plugins:
 provider:
   name: aws
   runtime: nodejs12.x
-  stage: ${opt:stage, 'prod'}
-  region: ${opt:region, 'us-east-2'}
+  stage: ${opt:stage, 'test'}
+  region: ${opt:region, 'us-east-1'}
 
   tracing:
     lambda: true
     apiGateway: true
 
   environment:
-    PROJECT_NAME: nganpv-serveless
+    UDACITY_PROJECT_NAME: nganpv-serveless-${self:provider.stage}
     TODOS_TABLE: nganpv-serverless-${self:provider.stage}
     S3_BUCKET_NAME: nganpv-serverless-${self:provider.stage}
 
@@ -37,6 +37,7 @@ custom:
       - name: CreateTodoRequest
         contentType: "application/json"
         schema: ${file(models/create-todo-validate-model.json)}
+        # Example for not use validate.json
         # schema:
         #   required:
         #     - name
@@ -50,23 +51,8 @@ custom:
       - name: UpdateTodoRequest
         contentType: "application/json"
         schema: ${file(models/update-todo-validate-model.json)}
-        # schema:
-        #   required:
-        #     - name
-        #     - dueDate
-        #     - done
-        #   properties:
-        #     name:
-        #       minLength: 1
-        #       type: string
-        #     dueDate:
-        #       type: string
-        #     done:
-        #       type: boolean
-
 
 functions:
-
   Auth:
     handler: src/lambda/auth/auth0Authorizer.handler
 
@@ -78,7 +64,7 @@ functions:
           path: todos
           cors: true
           authorizer: Auth
-    iamRoleStatementsName: ${self:provider.environment.PROJECT_NAME}-get-todo-role-${self:provider.stage}
+    iamRoleStatementsName: ${self:provider.environment.UDACITY_PROJECT_NAME}-get-todo-role-${self:provider.stage}
     iamRoleStatements:
       - Effect: Allow
         Action:
@@ -105,7 +91,7 @@ functions:
             requestModels:
               "application/json": CreateTodoRequest
           reqValidatorName: RequestBodyValidator
-    iamRoleStatementsName: ${self:provider.environment.PROJECT_NAME}-create-todo-role-${self:provider.stage}
+    iamRoleStatementsName: ${self:provider.environment.UDACITY_PROJECT_NAME}-create-todo-role-${self:provider.stage}
     iamRoleStatements:
       - Effect: Allow
         Action:
@@ -117,9 +103,7 @@ functions:
         Resource: 
           - '*'
 
-
 # Update todo
-
   UpdateTodo:
     handler: src/lambda/http/updateTodo.handler
     events:
@@ -134,7 +118,7 @@ functions:
             requestModels:
               "application/json": UpdateTodoRequest
           reqValidatorName: RequestBodyValidator
-    iamRoleStatementsName: ${self:provider.environment.PROJECT_NAME}-update-todo-role-${self:provider.stage}
+    iamRoleStatementsName: ${self:provider.environment.UDACITY_PROJECT_NAME}-update-todo-role-${self:provider.stage}
     iamRoleStatements:
       - Effect: Allow
         Action:
@@ -147,7 +131,6 @@ functions:
           - '*'
 
 # Delete Todo
-
   DeleteTodo:
     handler: src/lambda/http/deleteTodo.handler
     events:
@@ -156,17 +139,23 @@ functions:
           path: todos/{todoId}
           cors: true
           authorizer: Auth
-    iamRoleStatementsName: ${self:provider.environment.PROJECT_NAME}-delete-todo-role-${self:provider.stage}
+    iamRoleStatementsName: ${self:provider.environment.UDACITY_PROJECT_NAME}-delete-todo-role-${self:provider.stage}
     iamRoleStatements:
       - Effect: Allow
         Action:
           - dynamodb:DeleteItem
+          - dynamodb:Query
+          - dynamodb:GetItem
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
       - Effect: Allow
         Action:
           - xray:PutTraceSegments
         Resource: 
           - '*'
+      - Effect: Allow
+        Action:
+          - s3:DeleteObject
+        Resource: arn:aws:s3:::${self:provider.environment.S3_BUCKET_NAME}/*
 
   GenerateUploadUrl:
     handler: src/lambda/http/generateUploadUrl.handler
@@ -176,14 +165,17 @@ functions:
           path: todos/{todoId}/attachment
           cors: true
           authorizer: Auth
-    iamRoleStatementsName: ${self:provider.environment.PROJECT_NAME}-s3-upload-role-${self:provider.stage}
+    iamRoleStatementsName: ${self:provider.environment.UDACITY_PROJECT_NAME}-s3-upload-role-${self:provider.stage}
     iamRoleStatements:
       - Effect: Allow
         Action:
-          - s3:*
-          - xray:PutTraceSegments 
+          - s3:PutObject
         Resource: arn:aws:s3:::${self:provider.environment.S3_BUCKET_NAME}/*
-
+      - Effect: Allow
+        Action:
+          - xray:PutTraceSegments 
+        Resource:
+        - '*'
 
 resources:
   Resources:
@@ -227,7 +219,7 @@ resources:
                 - POST
                 - DELETE
                 - HEAD
-              MaxAge: 300
+              MaxAge: 600
    
     RequestBodyValidator:
       Type: AWS::ApiGateway::RequestValidator
@@ -238,6 +230,7 @@ resources:
         ValidateRequestBody: true
         ValidateRequestParameters: false
 
+    # Response for Err status 4xx
     GatewayResponseDefault4XX:
       Type: AWS::ApiGateway::GatewayResponse
       Properties:
@@ -249,6 +242,7 @@ resources:
         RestApiId:
           Ref: ApiGatewayRestApi
 
+    # Response for Err status 5xx
     GatewayResponseDefault5XX:
       Type: AWS::ApiGateway::GatewayResponse
       Properties:
@@ -260,6 +254,7 @@ resources:
         RestApiId:
           Ref: ApiGatewayRestApi 
 
+    # For cross referencing the name of the bucket, use "!Ref AttachmentsBucket"
     BucketPolicy:
       Type: AWS::S3::BucketPolicy
       Properties:
